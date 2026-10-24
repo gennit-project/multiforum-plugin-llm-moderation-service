@@ -1,0 +1,11 @@
+project_id = "replace-with-gcp-project-id"
+image      = "us-central1-docker.pkg.dev/replace-with-gcp-project-id/multiforum-llm-moderation/llm-moderation-service:replace-with-commit-sha"
+
+# The experimental rollout intentionally stays on one scale-to-zero instance
+# so its in-process provider limit is also the service-wide limit.
+min_instance_count = 0
+max_instance_count = 1
+
+provider_model                 = "gpt-4o-mini"
+provider_concurrency           = 2
+provider_rate_limit_per_minute = 30
