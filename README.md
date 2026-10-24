@@ -54,3 +54,78 @@ included in both successful and provider-error responses.
 
 Provider credentials are service environment variables and are never sent to
 or stored by the Multiforum backend.
+
+## Cloud Run deployment
+
+Deployment is intentionally manual. Merging code does not modify GCP or deploy
+a revision. The production workflow uses Workload Identity Federation, builds
+an immutable commit-tagged image, applies Terraform, and verifies health plus
+API-key enforcement. A provider-backed smoke request is optional and disabled
+by default to avoid an unexpected model charge.
+
+### One-time bootstrap
+
+An operator with permission to administer the target GCP project and repository
+runs:
+
+```bash
+export GCP_PROJECT_ID=your-project-id
+export GITHUB_REPOSITORY=gennit-project/multiforum-plugin-llm-moderation-service
+bash scripts/bootstrap_gcp.sh
+```
+
+The bootstrap creates or reuses the Terraform state bucket, a dedicated deploy
+service account, and a repository-specific Workload Identity provider. It also
+sets these repository variables:
+
+- `GCP_PROJECT_ID`
+- `GCP_REGION`
+- `TF_STATE_BUCKET`
+- `GCP_DEPLOY_SERVICE_ACCOUNT`
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+
+Configure the following secrets in the repository's protected `production`
+environment before the first deployment:
+
+- `MOD_API_KEY`: a randomly generated shared key of at least 32 characters
+- `MOD_PROVIDER_API_KEY`: the external LLM provider credential
+
+The workflow also accepts optional repository variables corresponding to the
+non-secret `MOD_PROVIDER_*` settings in the configuration table. Defaults match
+the application defaults.
+
+### Deployment and verification
+
+Run the `Deploy LLM moderation service` workflow manually from the intended
+commit or tag. The workflow:
+
+1. validates required variables and secrets;
+2. creates the Artifact Registry repository and secret containers when needed;
+3. uploads new secret versions without storing plaintext in Terraform state;
+4. builds and pushes an image tagged with the commit SHA;
+5. applies the reviewed Terraform plan;
+6. verifies `/health` and confirms `/moderate` rejects missing credentials.
+
+Enable `run_live_moderation` only when one real provider request is desired.
+The check validates the structured response but does not require a particular
+moderation recommendation.
+
+The experimental configuration defaults to scale-to-zero with one maximum
+instance. This makes the in-process provider rate limit a service-wide ceiling.
+Increasing `max_instance_count` multiplies the effective provider concurrency
+and per-minute limits and should be paired with a distributed limiter or a
+deliberate provider-capacity review.
+
+### Secret rotation and rollback
+
+Rotate either credential by updating the matching GitHub production secret and
+dispatching the deployment workflow again. The workflow creates a new Secret
+Manager version and forces a new Cloud Run revision.
+
+To roll back, dispatch the workflow from the previously reviewed commit or tag.
+Images are immutable and tagged by commit SHA, so the selected source revision
+determines the exact image and infrastructure definition restored by Terraform.
+
+Terraform state uses the `llm-moderation/production` prefix in the configured
+GCS bucket. Terraform owns secret containers and IAM bindings, but never secret
+values.

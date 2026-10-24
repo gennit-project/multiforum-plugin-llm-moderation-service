@@ -29,3 +29,23 @@ jobs:
 
       - name: Test (pytest)
         run: pytest --cov=app --cov-report=term-missing --cov-fail-under=80 -q
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Validate Terraform
+        run: |
+          terraform -chdir=terraform fmt -check
+          terraform -chdir=terraform init -backend=false
+          terraform -chdir=terraform validate
+
+      - name: Check bootstrap script syntax
+        run: bash -n scripts/bootstrap_gcp.sh

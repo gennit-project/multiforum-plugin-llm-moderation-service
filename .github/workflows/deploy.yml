@@ -1,0 +1,168 @@
+name: Deploy LLM moderation service
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_live_moderation:
+        description: Run one authenticated provider-backed moderation check
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: llm-moderation-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Provision, deploy, and verify
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_environment: production
+      TF_VAR_region: ${{ vars.GCP_REGION || 'us-central1' }}
+      TF_VAR_service_name: ${{ vars.CLOUD_RUN_SERVICE || 'llm-moderation-service' }}
+      TF_VAR_artifact_repository: ${{ vars.ARTIFACT_REPOSITORY || 'multiforum-llm-moderation' }}
+      TF_VAR_deployment_revision: run-${{ github.run_id }}-${{ github.run_attempt }}
+      TF_VAR_api_key_secret_id: ${{ vars.MOD_API_KEY_SECRET_ID || 'llm-moderation-api-key' }}
+      TF_VAR_provider_api_key_secret_id: ${{ vars.MOD_PROVIDER_API_KEY_SECRET_ID || 'llm-moderation-provider-api-key' }}
+      TF_VAR_provider_base_url: ${{ vars.MOD_PROVIDER_BASE_URL || 'https://api.openai.com/v1' }}
+      TF_VAR_provider_model: ${{ vars.MOD_PROVIDER_MODEL || 'gpt-4o-mini' }}
+      TF_VAR_provider_timeout_seconds: ${{ vars.MOD_PROVIDER_TIMEOUT_SECONDS || '30' }}
+      TF_VAR_provider_concurrency: ${{ vars.MOD_PROVIDER_CONCURRENCY || '2' }}
+      TF_VAR_provider_rate_limit_per_minute: ${{ vars.MOD_PROVIDER_RATE_LIMIT_PER_MINUTE || '30' }}
+      TF_VAR_provider_max_attempts: ${{ vars.MOD_PROVIDER_MAX_ATTEMPTS || '3' }}
+      TF_VAR_provider_retry_base_seconds: ${{ vars.MOD_PROVIDER_RETRY_BASE_SECONDS || '0.25' }}
+      TF_VAR_provider_retry_max_seconds: ${{ vars.MOD_PROVIDER_RETRY_MAX_SECONDS || '5' }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Validate deployment configuration
+        env:
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          MOD_API_KEY: ${{ secrets.MOD_API_KEY }}
+          MOD_PROVIDER_API_KEY: ${{ secrets.MOD_PROVIDER_API_KEY }}
+        run: |
+          set -euo pipefail
+          required=(
+            TF_VAR_project_id
+            GCP_WORKLOAD_IDENTITY_PROVIDER
+            GCP_DEPLOY_SERVICE_ACCOUNT
+            TF_STATE_BUCKET
+            MOD_API_KEY
+            MOD_PROVIDER_API_KEY
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing production variable or secret: ${name}"
+              exit 1
+            fi
+          done
+          if (( ${#MOD_API_KEY} < 32 )); then
+            echo "::error::MOD_API_KEY must contain at least 32 characters in production."
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Initialize Terraform
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          terraform -chdir=terraform init -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config="prefix=llm-moderation/production"
+          terraform -chdir=terraform fmt -check
+          terraform -chdir=terraform validate
+
+      - name: Provision build prerequisites
+        run: >-
+          terraform -chdir=terraform apply -auto-approve
+          -target='google_project_service.required'
+          -target='google_artifact_registry_repository.images'
+          -target='google_secret_manager_secret.api_key'
+          -target='google_secret_manager_secret.provider_api_key'
+          -var="image=bootstrap.invalid/llm-moderation:unpublished"
+
+      - name: Upload secret versions
+        env:
+          MOD_API_KEY: ${{ secrets.MOD_API_KEY }}
+          MOD_PROVIDER_API_KEY: ${{ secrets.MOD_PROVIDER_API_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${MOD_API_KEY}" |
+            gcloud secrets versions add "${TF_VAR_api_key_secret_id}" --data-file=-
+          printf '%s' "${MOD_PROVIDER_API_KEY}" |
+            gcloud secrets versions add "${TF_VAR_provider_api_key_secret_id}" --data-file=-
+
+      - name: Build and publish immutable image
+        id: image
+        run: |
+          set -euo pipefail
+          registry="${TF_VAR_region}-docker.pkg.dev"
+          image="${registry}/${TF_VAR_project_id}/${TF_VAR_artifact_repository}/llm-moderation-service:${GITHUB_SHA}"
+          gcloud auth configure-docker "${registry}" --quiet
+          docker build --tag "${image}" .
+          docker push "${image}"
+          echo "uri=${image}" >> "${GITHUB_OUTPUT}"
+
+      - name: Plan infrastructure
+        run: >-
+          terraform -chdir=terraform plan
+          -out=production.tfplan
+          -var="image=${{ steps.image.outputs.uri }}"
+
+      - name: Apply infrastructure
+        run: terraform -chdir=terraform apply -auto-approve production.tfplan
+
+      - name: Read deployed service URL
+        id: service
+        run: |
+          service_url="$(terraform -chdir=terraform output -raw service_url)"
+          echo "url=${service_url}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### LLM moderation deployment"
+            echo "- Service: ${service_url}"
+            echo "- Image: ${{ steps.image.outputs.uri }}"
+            echo "- Live provider check: ${{ inputs.run_live_moderation }}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Verify health and authentication
+        env:
+          MOD_API_KEY: ${{ secrets.MOD_API_KEY }}
+        run: >-
+          python scripts/verify_deployment.py
+          --service-url "${{ steps.service.outputs.url }}"
+          --api-key "${MOD_API_KEY}"
+
+      - name: Run optional live moderation check
+        if: ${{ inputs.run_live_moderation }}
+        env:
+          MOD_API_KEY: ${{ secrets.MOD_API_KEY }}
+        run: >-
+          python scripts/verify_deployment.py
+          --service-url "${{ steps.service.outputs.url }}"
+          --api-key "${MOD_API_KEY}"
+          --run-live-moderation
