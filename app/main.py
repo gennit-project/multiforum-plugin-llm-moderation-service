@@ -1,22 +1,45 @@
 import json
 import logging
 import re
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+import httpx
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 
 from .config import Settings, get_settings
 from .models import HealthResponse, ModerationRequest, ModerationResponse
-from .provider import ModerationProvider, OpenAICompatibleProvider, ProviderError
+from .provider import ModerationProvider, OpenAICompatibleProvider, ProviderError, ProviderGate
 from .security import require_api_key
 
 logger = logging.getLogger(__name__)
-app = FastAPI(title="Multiforum LLM Moderation Service", version="0.1.0")
 CORRELATION_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
-def get_provider(settings: Settings = Depends(get_settings)) -> ModerationProvider:
-    return OpenAICompatibleProvider(settings)
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    async with httpx.AsyncClient() as client:
+        application.state.provider_client = client
+        application.state.provider_gates = {}
+        yield
+
+
+app = FastAPI(title="Multiforum LLM Moderation Service", version="0.2.0", lifespan=lifespan)
+
+
+def get_provider(
+    request: Request, settings: Settings = Depends(get_settings)
+) -> ModerationProvider:
+    gate_key = (settings.provider_concurrency, settings.provider_rate_limit_per_minute)
+    gates: dict[tuple[int, int], ProviderGate] = request.app.state.provider_gates
+    gate = gates.setdefault(
+        gate_key,
+        ProviderGate(
+            concurrency=settings.provider_concurrency,
+            rate_limit_per_minute=settings.provider_rate_limit_per_minute,
+        ),
+    )
+    return OpenAICompatibleProvider(settings, request.app.state.provider_client, gate)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["ops"])
@@ -45,8 +68,19 @@ async def moderate(
     try:
         verdict = await provider.moderate(request)
     except ProviderError as exc:
-        logger.warning(json.dumps({"event": "moderation_failed", "correlation_id": correlation_id}))
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        logger.warning(
+            json.dumps(
+                {
+                    "event": "moderation_failed",
+                    "correlation_id": correlation_id,
+                    "error_type": type(exc).__name__,
+                }
+            )
+        )
+        headers = {"X-Correlation-ID": correlation_id}
+        if exc.retry_after is not None:
+            headers["Retry-After"] = str(exc.retry_after)
+        raise HTTPException(status_code=exc.status_code, detail=str(exc), headers=headers) from exc
     logger.info(
         json.dumps(
             {
