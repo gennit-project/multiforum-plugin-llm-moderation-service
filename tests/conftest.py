@@ -6,15 +6,18 @@ from fastapi.testclient import TestClient
 from app.config import Settings, get_settings
 from app.main import app, get_provider
 from app.models import ModerationRequest, ModerationResponse
+from app.provider import ProviderError
 
 
 class FakeProvider:
-    def __init__(self, response: ModerationResponse):
+    def __init__(self, response: ModerationResponse | ProviderError):
         self.response = response
         self.requests: list[ModerationRequest] = []
 
     async def moderate(self, request: ModerationRequest) -> ModerationResponse:
         self.requests.append(request)
+        if isinstance(self.response, ProviderError):
+            raise self.response
         return self.response
 
 
@@ -35,7 +38,7 @@ def client(settings: Settings) -> Iterator[TestClient]:
 def override_provider():
     providers: list[FakeProvider] = []
 
-    def apply(response: ModerationResponse) -> FakeProvider:
+    def apply(response: ModerationResponse | ProviderError) -> FakeProvider:
         provider = FakeProvider(response)
         providers.append(provider)
         app.dependency_overrides[get_provider] = lambda: provider
