@@ -4,6 +4,8 @@ This root owns the foundation required before the normal deployment Terraform
 can run: bootstrap APIs, the versioned GCS state bucket, the GitHub deployer
 identity and IAM grants, repository-scoped Workload Identity Federation, the
 protected GitHub `production` environment, and non-secret Actions variables.
+It also owns the sibling plugin repository's protected `release` environment,
+so the same reviewer team must approve production deployment and publication.
 
 Secret values are deliberately not Terraform inputs or resources. Terraform
 state must never contain service credentials, smoke-identity credentials,
@@ -38,7 +40,7 @@ contains no secrets. Then initialize the main bootstrap root directly against
 the bucket and apply the reviewed identity/GitHub plan:
 
 ```bash
-export GITHUB_TOKEN="a fine-grained token with repository administration access"
+export GITHUB_TOKEN="a fine-grained token with administration access to the service and plugin repositories"
 terraform -chdir=bootstrap init \
   -backend-config="bucket=YOUR_STATE_BUCKET" \
   -backend-config="prefix=llm-moderation/bootstrap"
@@ -95,6 +97,8 @@ terraform -chdir=bootstrap import google_iam_workload_identity_pool_provider.rep
   projects/YOUR_PROJECT_NUMBER/locations/global/workloadIdentityPools/github-actions/providers/llm-moderation-service
 terraform -chdir=bootstrap import github_repository_environment.production \
   multiforum-plugin-llm-moderation-service:production
+terraform -chdir=bootstrap import github_repository_environment.plugin_release \
+  multiforum-plugin-llm-moderation:release
 ```
 
 Import existing project IAM, bucket IAM, service-account IAM, API, and GitHub

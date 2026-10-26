@@ -26,6 +26,12 @@ variable "github_repository" {
   default     = "multiforum-plugin-llm-moderation-service"
 }
 
+variable "plugin_github_repository" {
+  type        = string
+  description = "GitHub plugin repository whose protected release environment gates publication."
+  default     = "multiforum-plugin-llm-moderation"
+}
+
 variable "production_reviewer_team_ids" {
   type        = list(number)
   description = "GitHub team database IDs allowed to approve production deployments."

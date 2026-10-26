@@ -106,6 +106,20 @@ resource "github_repository_environment" "production" {
   }
 }
 
+resource "github_repository_environment" "plugin_release" {
+  repository  = var.plugin_github_repository
+  environment = "release"
+
+  reviewers {
+    teams = var.production_reviewer_team_ids
+  }
+
+  deployment_branch_policy {
+    protected_branches     = true
+    custom_branch_policies = false
+  }
+}
+
 resource "github_actions_variable" "project_id" {
   repository    = var.github_repository
   variable_name = "GCP_PROJECT_ID"
