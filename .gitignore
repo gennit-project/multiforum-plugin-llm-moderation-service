@@ -11,3 +11,6 @@ htmlcov/
 terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.*
+bootstrap/**/.terraform/
+bootstrap/**/*.tfstate
+bootstrap/**/*.tfstate.*

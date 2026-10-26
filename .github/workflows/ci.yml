@@ -43,9 +43,12 @@ jobs:
 
       - name: Validate Terraform
         run: |
+          terraform -chdir=bootstrap/foundation fmt -check
+          terraform -chdir=bootstrap/foundation init -backend=false
+          terraform -chdir=bootstrap/foundation validate
+          terraform -chdir=bootstrap fmt -check
+          terraform -chdir=bootstrap init -backend=false
+          terraform -chdir=bootstrap validate
           terraform -chdir=terraform fmt -check
           terraform -chdir=terraform init -backend=false
           terraform -chdir=terraform validate
-
-      - name: Check bootstrap script syntax
-        run: bash -n scripts/bootstrap_gcp.sh
