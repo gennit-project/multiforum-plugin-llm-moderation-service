@@ -121,6 +121,47 @@ Enable `run_live_moderation` only when one real provider request is desired.
 The check validates the structured response but does not require a particular
 moderation recommendation.
 
+### Production end-to-end smoke test
+
+After deployment and central plugin reconciliation succeed, run the
+**Production E2E moderation smoke** workflow from `main`. It is dispatch-only,
+uses the protected `production` environment, and requires the exact confirmation
+`RUN PRODUCTION LLM SMOKE`. It cannot accept an arbitrary forum: the target is
+the fixed `MULTIFORUM_SMOKE_FORUM` repository variable, which must name the
+dedicated trial forum in the reconciled allowlist.
+
+Configure these non-secret production variables:
+
+- `MULTIFORUM_GRAPHQL_URL`, `MULTIFORUM_OAUTH_TOKEN_URL`,
+  `MULTIFORUM_OAUTH_CLIENT_ID`, and `MULTIFORUM_OAUTH_AUDIENCE`;
+- `MULTIFORUM_OAUTH_REALM` when the connection is not
+  `Username-Password-Authentication`;
+- `MULTIFORUM_SMOKE_FORUM`, `MULTIFORUM_SMOKE_AUTHOR_USERNAME`, and
+  `MULTIFORUM_SMOKE_EXPECTED_RULE`.
+
+Configure these production secrets:
+
+- `MULTIFORUM_OAUTH_CLIENT_SECRET`;
+- `MULTIFORUM_SMOKE_LOGIN` and `MULTIFORUM_SMOKE_PASSWORD` for a dedicated,
+  verified automation user whose persisted username is the configured author;
+- `MULTIFORUM_SMOKE_VIOLATION_TEXT`, synthetic text deliberately violating the
+  expected canonical server rule.
+
+The workflow creates and then edits one labelled discussion, waits for the
+durable plugin pipeline, and verifies the cited rule, bot actor, structured
+recommendation, and exactly two report actions after a settle period. On
+timeout it prints bounded pipeline/job status diagnostics without provider
+messages or submitted content. The content and issue are intentionally retained
+under the `[LLM-SMOKE][RETAINED]` convention for auditability; this avoids a
+third mutation and provider charge.
+
+Normal cost is two moderation calls. With the default maximum of three provider
+attempts and three durable queue retries after the initial run, the expected
+ceiling is 24 provider attempts. The code-enforced limits (ten provider attempts
+and ten durable retries) make the absolute ceiling 220 provider attempts per
+workflow dispatch. Keep production at the lower defaults, and require a new
+review before increasing either retry setting.
+
 The experimental configuration defaults to scale-to-zero with one maximum
 instance. This makes the in-process provider rate limit a service-wide ceiling.
 Increasing `max_instance_count` multiplies the effective provider concurrency
