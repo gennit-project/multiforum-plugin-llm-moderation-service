@@ -17,6 +17,16 @@ locals {
     "roles/secretmanager.admin",
     "roles/serviceusage.serviceUsageAdmin",
   ])
+  smoke_actions_variables = {
+    MULTIFORUM_GRAPHQL_URL           = var.multiforum_graphql_url
+    MULTIFORUM_OAUTH_TOKEN_URL       = var.multiforum_oauth_token_url
+    MULTIFORUM_OAUTH_CLIENT_ID       = var.multiforum_oauth_client_id
+    MULTIFORUM_OAUTH_AUDIENCE        = var.multiforum_oauth_audience
+    MULTIFORUM_OAUTH_REALM           = var.multiforum_oauth_realm
+    MULTIFORUM_SMOKE_FORUM           = var.multiforum_smoke_forum
+    MULTIFORUM_SMOKE_AUTHOR_USERNAME = var.multiforum_smoke_author_username
+    MULTIFORUM_SMOKE_EXPECTED_RULE   = var.multiforum_smoke_expected_rule
+  }
 }
 
 resource "google_project_service" "bootstrap" {
@@ -124,4 +134,12 @@ resource "github_actions_variable" "workload_identity_provider" {
   repository    = var.github_repository
   variable_name = "GCP_WORKLOAD_IDENTITY_PROVIDER"
   value         = google_iam_workload_identity_pool_provider.repository.name
+}
+
+resource "github_actions_variable" "smoke" {
+  for_each = local.smoke_actions_variables
+
+  repository    = var.github_repository
+  variable_name = each.key
+  value         = each.value
 }

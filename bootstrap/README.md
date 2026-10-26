@@ -6,8 +6,9 @@ identity and IAM grants, repository-scoped Workload Identity Federation, the
 protected GitHub `production` environment, and non-secret Actions variables.
 
 Secret values are deliberately not Terraform inputs or resources. Terraform
-state must never contain `MOD_API_KEY`, `MOD_PROVIDER_API_KEY`, or the GitHub
-token used to dispatch central plugin reconciliation.
+state must never contain service credentials, smoke-identity credentials,
+synthetic violation text, or the GitHub token used to dispatch central plugin
+reconciliation.
 
 ## First apply
 
@@ -58,7 +59,18 @@ configuration or state:
 gh secret set MOD_API_KEY --repo gennit-project/multiforum-plugin-llm-moderation-service --env production
 gh secret set MOD_PROVIDER_API_KEY --repo gennit-project/multiforum-plugin-llm-moderation-service --env production
 gh secret set MULTIFORUM_AUTOMATION_GITHUB_TOKEN --repo gennit-project/multiforum-plugin-llm-moderation-service --env production
+gh secret set MULTIFORUM_OAUTH_CLIENT_SECRET --repo gennit-project/multiforum-plugin-llm-moderation-service --env production
+gh secret set MULTIFORUM_SMOKE_LOGIN --repo gennit-project/multiforum-plugin-llm-moderation-service --env production
+gh secret set MULTIFORUM_SMOKE_PASSWORD --repo gennit-project/multiforum-plugin-llm-moderation-service --env production
+gh secret set MULTIFORUM_SMOKE_VIOLATION_TEXT --repo gennit-project/multiforum-plugin-llm-moderation-service --env production
 ```
+
+The main bootstrap root manages every non-secret smoke-workflow variable from
+`terraform.tfvars`. Keep `multiforum_smoke_forum` identical to the central
+backend's `LLM_MODERATION_TRIAL_FORUM`; the smoke workflow deliberately offers
+no forum input and therefore cannot be redirected to ordinary production data.
+The four smoke values above are the only additional terminal-supplied secrets.
+They are never placed in Terraform state or workflow output.
 
 ## Adopting existing resources
 
