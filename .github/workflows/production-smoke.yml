@@ -1,0 +1,91 @@
+name: Production E2E moderation smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type RUN PRODUCTION LLM SMOKE to authorize two live moderation events
+        required: true
+        type: string
+      timeout_seconds:
+        description: Maximum wait for each asynchronous moderation result
+        required: false
+        default: "300"
+        type: string
+
+concurrency:
+  group: llm-moderation-production-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Verify the production moderation path
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    env:
+      MULTIFORUM_GRAPHQL_URL: ${{ vars.MULTIFORUM_GRAPHQL_URL }}
+      MULTIFORUM_SMOKE_FORUM: ${{ vars.MULTIFORUM_SMOKE_FORUM }}
+      MULTIFORUM_SMOKE_AUTHOR_USERNAME: ${{ vars.MULTIFORUM_SMOKE_AUTHOR_USERNAME }}
+      MULTIFORUM_SMOKE_EXPECTED_RULE: ${{ vars.MULTIFORUM_SMOKE_EXPECTED_RULE }}
+      MULTIFORUM_OAUTH_TOKEN_URL: ${{ vars.MULTIFORUM_OAUTH_TOKEN_URL }}
+      MULTIFORUM_OAUTH_CLIENT_ID: ${{ vars.MULTIFORUM_OAUTH_CLIENT_ID }}
+      MULTIFORUM_OAUTH_AUDIENCE: ${{ vars.MULTIFORUM_OAUTH_AUDIENCE }}
+      MULTIFORUM_OAUTH_REALM: ${{ vars.MULTIFORUM_OAUTH_REALM || 'Username-Password-Authentication' }}
+      MULTIFORUM_OAUTH_CLIENT_SECRET: ${{ secrets.MULTIFORUM_OAUTH_CLIENT_SECRET }}
+      MULTIFORUM_SMOKE_LOGIN: ${{ secrets.MULTIFORUM_SMOKE_LOGIN }}
+      MULTIFORUM_SMOKE_PASSWORD: ${{ secrets.MULTIFORUM_SMOKE_PASSWORD }}
+      MULTIFORUM_SMOKE_VIOLATION_TEXT: ${{ secrets.MULTIFORUM_SMOKE_VIOLATION_TEXT }}
+      SMOKE_CONFIRMATION: ${{ inputs.confirmation }}
+      SMOKE_TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
+
+    steps:
+      - name: Check out the reviewed smoke test
+        uses: actions/checkout@v4
+
+      - name: Require the default branch and explicit confirmation
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "::error::The production smoke test must run from main."
+            exit 1
+          fi
+          if [[ "${SMOKE_CONFIRMATION}" != "RUN PRODUCTION LLM SMOKE" ]]; then
+            echo "::error::Confirmation text did not match."
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the reviewed client
+        run: python -m pip install .
+
+      - name: Run create, edit, persistence, and duplicate checks
+        id: smoke
+        run: |
+          set -euo pipefail
+          result="$(python scripts/production_smoke.py \
+            --confirm "${SMOKE_CONFIRMATION}" \
+            --timeout-seconds "${SMOKE_TIMEOUT_SECONDS}")"
+          printf '%s\n' "${result}" > "${RUNNER_TEMP}/production-smoke-result.json"
+
+      - name: Publish concise deployment summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### Production LLM moderation smoke"
+            if [[ -s "${RUNNER_TEMP}/production-smoke-result.json" ]]; then
+              echo "- Result: passed"
+              echo "- Path: discussion create + edit → durable queue → plugin → Cloud Run → issue"
+              echo "- Duplicate report actions: 0"
+              echo "- Content: retained with an explicit \`[LLM-SMOKE][RETAINED]\` label"
+              echo "- Provider bound: 2 moderation events; absolute maximum 220 provider attempts including code-limited retries"
+            else
+              echo "- Result: failed; see the failing step and bounded pipeline diagnostics"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
