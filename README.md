@@ -89,6 +89,14 @@ environment before the first deployment:
 
 - `MOD_API_KEY`: a randomly generated shared key of at least 32 characters
 - `MOD_PROVIDER_API_KEY`: the external LLM provider credential
+- `MULTIFORUM_AUTOMATION_GITHUB_TOKEN`: a fine-grained token limited to Actions
+  write access on `gennit-project/multiforum-backend`, used only to dispatch the
+  central production plugin reconciliation workflow
+
+Configure the identical `MOD_API_KEY` in the backend repository's protected
+`production` environment. Configure its central workflow variables, including
+an explicit `LLM_MODERATION_TRIAL_FORUM`; the first rollout remains allowlist
+only. The provider key stays exclusively in this service repository.
 
 The workflow also accepts optional repository variables corresponding to the
 non-secret `MOD_PROVIDER_*` settings in the configuration table. Defaults match
@@ -105,6 +113,9 @@ commit or tag. The workflow:
 4. builds and pushes an image tagged with the commit SHA;
 5. applies the reviewed Terraform plan;
 6. verifies `/health` and confirms `/moderate` rejects missing credentials.
+7. dispatches the central Multiforum reconciliation with the Terraform service
+   URL; that reviewed workflow installs/enables v0.7.0 and owns all four LLM
+   event pipelines without replacing unrelated topology.
 
 Enable `run_live_moderation` only when one real provider request is desired.
 The check validates the structured response but does not require a particular

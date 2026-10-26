@@ -90,7 +90,8 @@ GitHub repository variables now point to:
 Still required in the GitHub production environment:
   secrets.MOD_API_KEY
   secrets.MOD_PROVIDER_API_KEY
+  secrets.MULTIFORUM_AUTOMATION_GITHUB_TOKEN
 
-Keep a secure copy of MOD_API_KEY. Multiforum must configure the
-llm-moderation plugin with the same shared secret.
+Keep a secure copy of MOD_API_KEY. The backend repository's central production
+plugin workflow must use the same shared secret.
 EOF

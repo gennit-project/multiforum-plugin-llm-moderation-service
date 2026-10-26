@@ -51,6 +51,7 @@ jobs:
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
           MOD_API_KEY: ${{ secrets.MOD_API_KEY }}
           MOD_PROVIDER_API_KEY: ${{ secrets.MOD_PROVIDER_API_KEY }}
+          MULTIFORUM_AUTOMATION_GITHUB_TOKEN: ${{ secrets.MULTIFORUM_AUTOMATION_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           required=(
@@ -60,6 +61,7 @@ jobs:
             TF_STATE_BUCKET
             MOD_API_KEY
             MOD_PROVIDER_API_KEY
+            MULTIFORUM_AUTOMATION_GITHUB_TOKEN
           )
           for name in "${required[@]}"; do
             if [[ -z "${!name:-}" ]]; then
@@ -166,3 +168,43 @@ jobs:
           --service-url "${{ steps.service.outputs.url }}"
           --api-key "${MOD_API_KEY}"
           --run-live-moderation
+
+      - name: Dispatch central Multiforum reconciliation
+        env:
+          GH_TOKEN: ${{ secrets.MULTIFORUM_AUTOMATION_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          correlation_id="llm-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh workflow run production-plugin-configuration.yml \
+            --repo gennit-project/multiforum-backend \
+            --ref main \
+            --field operation=apply \
+            --field llm_moderation_service_url="${{ steps.service.outputs.url }}" \
+            --field correlation_id="${correlation_id}"
+          run_id=""
+          for _attempt in {1..30}; do
+            run_id="$(gh run list \
+              --repo gennit-project/multiforum-backend \
+              --workflow production-plugin-configuration.yml \
+              --limit 20 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"${correlation_id}\")) | .databaseId" |
+              head -n 1)"
+            [[ -n "${run_id}" ]] && break
+            sleep 5
+          done
+          if [[ -z "${run_id}" ]]; then
+            echo "::error::Central reconciliation run was not found."
+            exit 1
+          fi
+          gh run watch "${run_id}" \
+            --repo gennit-project/multiforum-backend \
+            --exit-status
+          {
+            echo "### Multiforum reconciliation"
+            echo "- Status: succeeded"
+            echo "- Correlation: \`${correlation_id}\`"
+            echo "- Run: [${run_id}](https://github.com/gennit-project/multiforum-backend/actions/runs/${run_id})"
+            echo "- Desired state: [multiforum-backend production workflow](https://github.com/gennit-project/multiforum-backend/actions/workflows/production-plugin-configuration.yml)"
+            echo "- Secrets: transferred only inside protected workflows; no values logged"
+          } >> "${GITHUB_STEP_SUMMARY}"
