@@ -1,0 +1,13 @@
+project_id                   = "replace-with-gcp-project-id"
+state_bucket_name            = "replace-with-globally-unique-state-bucket"
+production_reviewer_team_ids = [1234567]
+
+# The forum must be the same dedicated forum supplied as
+# LLM_MODERATION_TRIAL_FORUM to central Multiforum reconciliation.
+multiforum_graphql_url           = "https://api.example.com/graphql"
+multiforum_oauth_token_url       = "https://example.us.auth0.com/oauth/token"
+multiforum_oauth_client_id       = "replace-with-public-client-id"
+multiforum_oauth_audience        = "https://api.example.com"
+multiforum_smoke_forum           = "llm-moderation-smoke"
+multiforum_smoke_author_username = "llm-smoke-automation"
+multiforum_smoke_expected_rule   = "Replace with the exact canonical server rule"

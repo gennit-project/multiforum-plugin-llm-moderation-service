@@ -66,23 +66,20 @@ by default to avoid an unexpected model charge.
 ### One-time bootstrap
 
 An operator with permission to administer the target GCP project and repository
-runs:
-
-```bash
-export GCP_PROJECT_ID=your-project-id
-export GITHUB_REPOSITORY=gennit-project/multiforum-plugin-llm-moderation-service
-bash scripts/bootstrap_gcp.sh
-```
-
-The bootstrap creates or reuses the Terraform state bucket, a dedicated deploy
-service account, and a repository-specific Workload Identity provider. It also
-sets these repository variables:
+applies the separate [`bootstrap/`](bootstrap/) Terraform root. It manages the
+versioned state bucket, dedicated deploy service account, least-privilege IAM,
+repository-specific Workload Identity provider, protected production
+environment, and these non-secret repository variables:
 
 - `GCP_PROJECT_ID`
 - `GCP_REGION`
 - `TF_STATE_BUCKET`
 - `GCP_DEPLOY_SERVICE_ACCOUNT`
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
+
+The bootstrap guide documents first apply, immediate migration from temporary
+local state to GCS, and imports for resources created by the retired shell
+bootstrap.
 
 Configure the following secrets in the repository's protected `production`
 environment before the first deployment:
