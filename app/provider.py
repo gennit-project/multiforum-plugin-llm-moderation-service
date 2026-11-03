@@ -13,7 +13,12 @@ import httpx
 from pydantic import ValidationError
 
 from .config import Settings
-from .models import ModerationRequest, ModerationResponse
+from .models import (
+    ModerationRequest,
+    ModerationResponse,
+    Recommendation,
+    RuleScope,
+)
 
 
 class ModerationProvider(Protocol):
@@ -85,6 +90,53 @@ and id. Return JSON matching the requested schema. Do not invent rule ids or
 repeat rule text. Recommend edit, remove, or none."""
 
 
+# Structured-outputs schema for ModerationResponse. In plain json_object mode the
+# model invents its own shape (e.g. {"recommendation", "reason"}), which fails
+# ModerationResponse validation (extra="forbid" plus the missing violations /
+# confidence / rationale fields). A strict json_schema forces the exact shape.
+# Enum values are read from the models so this cannot drift from them; the field
+# set is asserted against ModerationResponse in the tests.
+def _build_response_format() -> dict:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "moderation_response",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["violations", "recommendation", "confidence", "rationale"],
+                "properties": {
+                    "violations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["scope", "ruleId"],
+                            "properties": {
+                                "scope": {
+                                    "type": "string",
+                                    "enum": [scope.value for scope in RuleScope],
+                                },
+                                "ruleId": {"type": "string"},
+                            },
+                        },
+                    },
+                    "recommendation": {
+                        "type": "string",
+                        "enum": [choice.value for choice in Recommendation],
+                    },
+                    "confidence": {"type": "number"},
+                    "rationale": {"type": "string"},
+                },
+            },
+        },
+    }
+
+
+RESPONSE_FORMAT = _build_response_format()
+
+
 class OpenAICompatibleProvider:
     def __init__(
         self,
@@ -141,7 +193,7 @@ class OpenAICompatibleProvider:
             "model": model,
             "temperature": request.policy.temperature,
             "max_tokens": request.policy.max_tokens,
-            "response_format": {"type": "json_object"},
+            "response_format": RESPONSE_FORMAT,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {
