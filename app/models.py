@@ -56,6 +56,12 @@ class Violation(ApiModel):
 
 
 class ModerationResponse(ApiModel):
+    # The model reasons here before deciding. The strict response schema requires
+    # it (see provider.RESPONSE_FORMAT), so the model always produces it and the
+    # reason-then-decide shape sharply reduces false positives on nuanced rules.
+    # It is optional here and excluded from serialization, so the response the
+    # plugin receives is unchanged and a serialized verdict still re-validates.
+    analysis: str | None = Field(default=None, exclude=True)
     violations: list[Violation]
     recommendation: Recommendation
     confidence: float = Field(ge=0, le=1)

@@ -53,6 +53,7 @@ def provider(
 
 def success_response() -> httpx.Response:
     verdict = {
+        "analysis": "No rule is violated.",
         "violations": [],
         "recommendation": "none",
         "confidence": 0.1,
