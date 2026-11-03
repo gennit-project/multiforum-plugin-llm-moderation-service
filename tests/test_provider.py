@@ -80,6 +80,32 @@ async def test_provider_sends_content_as_json_data():
 
 
 @pytest.mark.asyncio
+async def test_provider_requests_structured_output_schema():
+    seen: dict = {}
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(http_request.content))
+        return success_response()
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    moderation_provider = provider(service_settings(), client)
+
+    await moderation_provider.moderate(request())
+
+    assert seen["response_format"]["type"] == "json_schema"
+    await client.aclose()
+
+
+def test_response_format_schema_matches_moderation_response_fields():
+    from app.models import ModerationResponse
+    from app.provider import RESPONSE_FORMAT
+
+    schema = RESPONSE_FORMAT["json_schema"]["schema"]
+
+    assert set(schema["required"]) == set(ModerationResponse.model_fields)
+
+
+@pytest.mark.asyncio
 async def test_provider_converts_invalid_output_to_provider_error():
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={"choices": []}))
