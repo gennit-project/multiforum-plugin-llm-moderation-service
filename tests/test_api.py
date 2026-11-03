@@ -43,6 +43,7 @@ def test_moderate_returns_structured_verdict(client, override_provider):
     provider = override_provider(
         ModerationResponse.model_validate(
             {
+                "analysis": "The content is promotional spam under server:0.",
                 "violations": [{"scope": "server", "ruleId": "server:0"}],
                 "recommendation": "remove",
                 "confidence": 0.93,
@@ -74,7 +75,11 @@ def test_moderate_rejects_duplicate_rule_keys(client):
 def test_moderate_rejects_log_unsafe_correlation_id(client, override_provider):
     override_provider(
         ModerationResponse(
-            violations=[], recommendation="none", confidence=0, rationale="No violation"
+            analysis="No rule is violated.",
+            violations=[],
+            recommendation="none",
+            confidence=0,
+            rationale="No violation",
         )
     )
     response = client.post(
